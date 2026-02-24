@@ -26,7 +26,7 @@ public final class KabalCrashReporter {
         public let osVersion: String
         public let deviceModel: String
         public let appBundleId: String
-        public let is Jailbroken: Bool
+        public let isJailbroken: Bool
         public let memoryUsage: UInt64?
         
         public init(osVersion: String, deviceModel: String, appBundleId: String, isJailbroken: Bool, memoryUsage: UInt64?) {
