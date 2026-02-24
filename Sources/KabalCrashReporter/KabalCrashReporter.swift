@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import KSCrash
+import UIKit
 
 public final class KabalCrashReporter {
     
@@ -48,16 +48,6 @@ public final class KabalCrashReporter {
     
     /// Initialize and start crash reporting
     public func start() {
-        // Configure KSCrash
-        let installation = KSCrashInstallationStandard.sharedInstance()
-        
-        installation?.url = URL(string: config.apiURL)
-        installation?.sendAllReportsDelay = 5.0
-        installation?.activate()
-        
-        // Install crash handler
-        KSCrash.sharedInstance().install()
-        
         // Set up unhandled exception handler
         setupUnhandledExceptionHandler()
         
