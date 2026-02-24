@@ -7,6 +7,9 @@
 
 import Foundation
 import UIKit
+import KSCrash
+import KSCrashInstallations
+import KSCrashSinks
 
 public final class KabalCrashReporter {
     
@@ -48,13 +51,49 @@ public final class KabalCrashReporter {
     
     /// Initialize and start crash reporting
     public func start() {
-        // Set up unhandled exception handler
-        setupUnhandledExceptionHandler()
+        do {
+            // Configure KSCrash v2
+            let crashConfig = KSCrashConfiguration()
+            crashConfig.monitors = .productionSafe
+            
+            // Configure report store
+            let storeConfig = CrashReportStoreConfiguration()
+            storeConfig.maxReportCount = 10
+            crashConfig.reportStoreConfiguration = storeConfig
+            
+            // Install KSCrash with config
+            try KSCrash.shared.install(with: crashConfig)
+            
+            // Set up custom sink for our API
+            setupCustomSink()
+            
+            // Set up unhandled exception handler
+            setupUnhandledExceptionHandler()
+            
+            print("[KabalCrashReporter] Started - sending to \(config.apiURL)")
+        } catch {
+            print("[KabalCrashReporter] Failed to install: \(error)")
+        }
+    }
+    
+    private func setupCustomSink() {
+        guard let url = URL(string: config.apiURL), !config.apiURL.isEmpty else {
+            print("[KabalCrashReporter] No API URL configured, crash reports will only be stored locally")
+            return
+        }
         
-        // Set up promise rejection handler
-        setupUnhandledPromiseRejectionHandler()
+        // Create HTTP sink for custom URL
+        let sink = HTTPPostSink(url: url.absoluteString, httpMethod: "POST")
+        sink.headers = [
+            "Content-Type": "application/json",
+            "User-Agent": "Kabal-iOS"
+        ]
         
-        print("[KabalCrashReporter] Started - sending to \(config.apiURL)")
+        // Set as sink for report store
+        KSCrash.shared.reportStore?.sink = sink
+        
+        // Auto-send reports after delay
+        KSCrash.shared.reportStore?.sendAllReportsDelay = 5.0
     }
     
     /// Get device info for crash context
@@ -156,8 +195,6 @@ public final class KabalCrashReporter {
         sendCrashReport(crashReport)
     }
     
-    // MARK: - Private
-    
     private func setupUnhandledExceptionHandler() {
         NSSetUncaughtExceptionHandler { exception in
             let stackTrace = exception.callStackSymbols.joined(separator: "\n")
@@ -178,10 +215,6 @@ public final class KabalCrashReporter {
             
             KabalCrashReporter.shared.sendCrashReport(crashReport)
         }
-    }
-    
-    private func setupUnhandledPromiseRejectionHandler() {
-        // Swift 5.3+
     }
     
     private func sendCrashReport(_ report: [String: Any]) {
@@ -219,7 +252,6 @@ public final class KabalCrashReporter {
     }
     
     private func mapToDevice(identifier: String) -> String {
-        // Map device identifiers to friendly names
         let deviceMap: [String: String] = [
             "iPhone14,4": "iPhone 13 mini",
             "iPhone14,5": "iPhone 13",
@@ -233,7 +265,6 @@ public final class KabalCrashReporter {
             "iPhone15,5": "iPhone 15 Plus",
             "iPhone16,1": "iPhone 15 Pro",
             "iPhone16,2": "iPhone 15 Pro Max",
-            // Add more as needed
         ]
         return deviceMap[identifier] ?? identifier
     }
@@ -272,27 +303,5 @@ public final class KabalCrashReporter {
 extension Error {
     var stackTrace: String {
         return Thread.callStackSymbols.joined(separator: "\n")
-    }
-}
-
-// MARK: - Convenient Error Reporting for URLSession
-extension KabalCrashReporter {
-    /// Wrapper for URLSession that automatically reports network errors
-    public static func urlSessionDataTask(
-        _ session: URLSession,
-        with request: URLRequest,
-        completionHandler: @escaping (Data?, URLResponse?, Error?) -> Void
-    ) -> URLSessionDataTask {
-        return session.dataTask(with: request) { [weak self] data, response, error in
-            if let error = error {
-                let statusCode = (response as? HTTPURLResponse)?.statusCode
-                self?.reportNetworkError(
-                    url: request.url?.absoluteString ?? "unknown",
-                    statusCode: statusCode,
-                    error: error
-                )
-            }
-            completionHandler(data, response, error)
-        }
     }
 }

@@ -12,10 +12,17 @@ let package = Package(
             targets: ["KabalCrashReporter"]
         ),
     ],
+    dependencies: [
+        .package(url: "https://github.com/kstenerud/KSCrash", from: "2.5.1")
+    ],
     targets: [
         .target(
             name: "KabalCrashReporter",
-            dependencies: []
+            dependencies: [
+                .product(name: "KSCrash", package: "KSCrash"),
+                .product(name: "KSCrashInstallations", package: "KSCrash"),
+                .product(name: "KSCrashSinks", package: "KSCrash")
+            ]
         ),
     ]
 )
