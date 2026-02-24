@@ -17,6 +17,19 @@ interface CrashReport {
 
 interface Env {
   DB: D1Database;
+  API_SECRET: string;
+}
+
+function authenticate(request: Request, env: Env): Response | null {
+  const apiKey = request.headers.get('X-API-Key');
+  
+  if (!apiKey || apiKey !== env.API_SECRET) {
+    return new Response(
+      JSON.stringify({ error: 'Unauthorized' }),
+      { status: 401, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } }
+    );
+  }
+  return null;
 }
 
 const CORS_HEADERS = {
@@ -34,8 +47,10 @@ export default {
 
     const url = new URL(request.url);
 
-    // POST /crashes - Submit a new crash report
+    // POST /crashes - Submit a new crash report (auth required)
     if (request.method === 'POST' && url.pathname === '/crashes') {
+      const authError = authenticate(request, env);
+      if (authError) return authError;
       return handleCrashSubmit(request, env);
     }
 
@@ -44,13 +59,17 @@ export default {
       return handleCrashList(request, env);
     }
 
-    // GET /crashes/new - Get new crashes (for cron)
+    // GET /crashes/new - Get new crashes (for cron, auth required)
     if (request.method === 'GET' && url.pathname === '/crashes/new') {
+      const authError = authenticate(request, env);
+      if (authError) return authError;
       return handleNewCrashes(request, env);
     }
 
-    // PATCH /crashes/:id - Update crash status (e.g., mark as fixed)
+    // PATCH /crashes/:id - Update crash status (auth required)
     if (request.method === 'PATCH' && url.pathname.startsWith('/crashes/')) {
+      const authError = authenticate(request, env);
+      if (authError) return authError;
       return handleCrashUpdate(request, env);
     }
 
