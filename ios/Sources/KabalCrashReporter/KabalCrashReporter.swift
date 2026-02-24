@@ -97,6 +97,61 @@ public final class KabalCrashReporter {
     
     /// Manually report a non-fatal error
     public func reportError(name: String, message: String?, stackTrace: String?) {
+        reportError(name: name, message: message, stackTrace: stackTrace, context: nil)
+    }
+    
+    /// Report a network/API error with full context
+    public func reportNetworkError(url: String, statusCode: Int?, error: Error?) {
+        let context: [String: Any] = [
+            "type": "network_error",
+            "url": url,
+            "status_code": statusCode ?? 0,
+            "error_description": error?.localizedDescription ?? ""
+        ]
+        
+        reportError(
+            name: "NetworkError",
+            message: error?.localizedDescription ?? "HTTP \(statusCode ?? 0)",
+            stackTrace: error.map { $0.stackTrace } ?? "",
+            context: context
+        )
+    }
+    
+    /// Report feedback from user
+    public func reportFeedback(type: FeedbackType, message: String, context: [String: Any]? = nil) {
+        var feedbackContext = context ?? [:]
+        feedbackContext["feedback_type"] = type.rawValue
+        feedbackContext["message"] = message
+        
+        let report: [String: Any] = [
+            "platform": "ios",
+            "app_version": config.appVersion,
+            "error_name": "FEEDBACK",
+            "message": message,
+            "stack_trace": "",
+            "user_id": config.userId ?? "",
+            "device_info": encodeToJSON(getDeviceInfo()),
+            "context": feedbackContext
+        ]
+        
+        sendCrashReport(report)
+    }
+    
+    /// Error types for feedback
+    public enum FeedbackType: String {
+        case onboarding = "onboarding"
+        case settings = "settings"
+        case bugReport = "bug_report"
+        case featureRequest = "feature_request"
+        case general = "general"
+    }
+    
+    // MARK: - Private
+    
+    private func reportError(name: String, message: String?, stackTrace: String?, context: [String: Any]?) {
+        var ctx = context ?? [:]
+        ctx["timestamp"] = Int(Date().timeIntervalSince1970)
+        
         let crashReport: [String: Any] = [
             "platform": "ios",
             "app_version": config.appVersion,
@@ -105,11 +160,7 @@ public final class KabalCrashReporter {
             "stack_trace": stackTrace ?? "",
             "user_id": config.userId ?? "",
             "device_info": encodeToJSON(getDeviceInfo()),
-            "context": [
-                "url": "",
-                "user_agent": "Kabal-iOS",
-                "timestamp": Int(Date().timeIntervalSince1970)
-            ]
+            "context": ctx
         ]
         
         sendCrashReport(crashReport)
@@ -224,5 +275,34 @@ public final class KabalCrashReporter {
             return string
         }
         return "{}"
+    }
+}
+
+// MARK: - Error Extension for Stack Trace
+extension Error {
+    var stackTrace: String {
+        return Thread.callStackSymbols.joined(separator: "\n")
+    }
+}
+
+// MARK: - Convenient Error Reporting for URLSession
+extension KabalCrashReporter {
+    /// Wrapper for URLSession that automatically reports network errors
+    public static func urlSessionDataTask(
+        _ session: URLSession,
+        with request: URLRequest,
+        completionHandler: @escaping (Data?, URLResponse?, Error?) -> Void
+    ) -> URLSessionDataTask {
+        return session.dataTask(with: request) { [weak self] data, response, error in
+            if let error = error {
+                let statusCode = (response as? HTTPURLResponse)?.statusCode
+                self?.reportNetworkError(
+                    url: request.url?.absoluteString ?? "unknown",
+                    statusCode: statusCode,
+                    error: error
+                )
+            }
+            completionHandler(data, response, error)
+        }
     }
 }

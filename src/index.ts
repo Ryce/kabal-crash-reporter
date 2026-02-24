@@ -13,6 +13,7 @@ interface CrashReport {
   user_id?: string;
   device_info?: Record<string, unknown>;
   context?: Record<string, unknown>;
+  feedback_type?: string;
 }
 
 interface Env {
@@ -98,9 +99,12 @@ async function handleCrashSubmit(request: Request, env: Env): Promise<Response> 
 
     const timestamp = Math.floor(Date.now() / 1000);
 
+    // Extract feedback_type from context if present
+    const feedbackType = body.context?.feedback_type as string | undefined;
+
     const result = await env.DB.prepare(
-      `INSERT INTO crashes (platform, app_version, error_name, message, stack_trace, user_id, device_info, context, timestamp)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO crashes (platform, app_version, error_name, message, stack_trace, user_id, device_info, context, timestamp, feedback_type)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       body.platform,
       body.app_version,
@@ -110,7 +114,8 @@ async function handleCrashSubmit(request: Request, env: Env): Promise<Response> 
       body.user_id || null,
       body.device_info ? JSON.stringify(body.device_info) : null,
       body.context ? JSON.stringify(body.context) : null,
-      timestamp
+      timestamp,
+      feedbackType || null
     ).run();
 
     return new Response(

@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS crashes (
   fix_commit TEXT,
   fix_pr_url TEXT,
   notes TEXT,
+  feedback_type TEXT,  -- 'onboarding', 'settings', 'bug_report', 'feature_request', 'general'
   created_at INTEGER DEFAULT (unixepoch()),
   updated_at INTEGER DEFAULT (unixepoch())
 );
