@@ -7,7 +7,7 @@
 
 import Foundation
 import UIKit
-import KSCrash
+import KSCrashRecording
 import KSCrashInstallations
 import KSCrashSinks
 
@@ -41,7 +41,7 @@ public final class KabalCrashReporter {
         }
     }
     
-    private let config: Config
+    private var config: Config
     
     public static let shared = KabalCrashReporter(config: Config(apiURL: "", appVersion: ""))
     
@@ -51,6 +51,10 @@ public final class KabalCrashReporter {
     
     /// Initialize and start crash reporting
     public func start() {
+        // Kabal calls `KabalCrashReporter(config: ...).start()` but reports through `.shared`.
+        // Mirror the runtime config into the shared singleton for those call sites.
+        KabalCrashReporter.shared.config = config
+
         do {
             // Configure KSCrash v2
             let crashConfig = KSCrashConfiguration()
@@ -67,8 +71,7 @@ public final class KabalCrashReporter {
             // Set up custom sink for our API
             setupCustomSink()
             
-            // Set up unhandled exception handler
-            setupUnhandledExceptionHandler()
+            // KSCrash handles uncaught exceptions as part of its installed monitors.
             
             print("[KabalCrashReporter] Started - sending to \(config.apiURL)")
         } catch {
@@ -83,17 +86,13 @@ public final class KabalCrashReporter {
         }
         
         // Create HTTP sink for custom URL
-        let sink = HTTPPostSink(url: url.absoluteString, httpMethod: "POST")
-        sink.headers = [
-            "Content-Type": "application/json",
-            "User-Agent": "Kabal-iOS"
-        ]
+        let sink = CrashReportSinkStandard(url: url)
         
         // Set as sink for report store
         KSCrash.shared.reportStore?.sink = sink
         
-        // Auto-send reports after delay
-        KSCrash.shared.reportStore?.sendAllReportsDelay = 5.0
+        // Attempt to upload any cached reports on startup.
+        KSCrash.shared.reportStore?.sendAllReports(completion: nil)
     }
     
     /// Get device info for crash context
@@ -205,7 +204,7 @@ public final class KabalCrashReporter {
                 "message": exception.reason ?? "No message",
                 "stack_trace": stackTrace,
                 "user_id": KabalCrashReporter.shared.config.userId ?? "",
-                "device_info": encodeToJSON(KabalCrashReporter.shared.getDeviceInfo()),
+                "device_info": KabalCrashReporter.shared.encodeToJSON(KabalCrashReporter.shared.getDeviceInfo()),
                 "context": [
                     "url": "",
                     "user_agent": "Kabal-iOS",
