@@ -48,6 +48,15 @@ public final class KabalCrashReporter {
     public init(config: Config) {
         self.config = config
     }
+
+    /// Update the user identifier attached to future crash/error reports.
+    public func setUserId(_ userId: String?) {
+        config = Config(
+            apiURL: config.apiURL,
+            appVersion: config.appVersion,
+            userId: userId
+        )
+    }
     
     /// Initialize and start crash reporting
     public func start() {
