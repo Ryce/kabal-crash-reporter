@@ -17,11 +17,13 @@ public final class KabalCrashReporter {
         public let apiURL: String
         public let appVersion: String
         public let userId: String?
+        public let apiKey: String?
         
-        public init(apiURL: String, appVersion: String, userId: String? = nil) {
+        public init(apiURL: String, appVersion: String, userId: String? = nil, apiKey: String? = nil) {
             self.apiURL = apiURL
             self.appVersion = appVersion
             self.userId = userId
+            self.apiKey = apiKey
         }
     }
     
@@ -231,6 +233,10 @@ public final class KabalCrashReporter {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        if let apiKey = config.apiKey {
+            request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        }
         
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: report)
