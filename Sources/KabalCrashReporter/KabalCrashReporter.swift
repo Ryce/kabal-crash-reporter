@@ -263,7 +263,8 @@ public final class KabalCrashReporter {
             "/Library/MobileSubstrate/MobileSubstrate.dylib",
             "/bin/bash",
             "/usr/sbin/sshd",
-            "/etc/apt"
+            "/etc/apt",
+            "/private/var/lib/apt/"
         ]
         return paths.contains { FileManager.default.fileExists(atPath: $0) }
         #endif
