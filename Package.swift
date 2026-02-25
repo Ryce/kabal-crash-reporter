@@ -7,8 +7,16 @@ let package = Package(
     products: [
         .library(name: "KabalCrashReporter", targets: ["KabalCrashReporter"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/kstenerud/KSCrash.git", exact: "2.5.1")
+    ],
     targets: [
-        .target(name: "KabalCrashReporter"),
+        .target(
+            name: "KabalCrashReporter",
+            dependencies: [
+                .product(name: "Installations", package: "KSCrash")
+            ]
+        ),
         .testTarget(name: "KabalCrashReporterTests", dependencies: ["KabalCrashReporter"])
     ]
 )

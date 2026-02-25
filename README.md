@@ -2,7 +2,7 @@
 
 Open-source crash reporting stack for iOS apps:
 
-- **iOS Swift Package** to capture crashes + non-fatal events
+- **iOS Swift Package** to capture crashes + non-fatal events (depends on **KSCrash 2.5.1**, latest)
 - **Cloudflare Worker API** to ingest, deduplicate, and query crash reports
 - **Cloudflare D1 schema** for storage
 - **Scripts** for symbol upload/download workflow
