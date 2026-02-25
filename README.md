@@ -29,7 +29,7 @@ This is the same mechanism Kabal uses, packaged so other teams can self-host.
 
 ## Repository layout
 
-- `ios/` — Swift Package (`KabalCrashReporter`)
+- `Package.swift`, `Sources/`, `Tests/` — Swift Package (`KabalCrashReporter`)
 - `worker/` — Cloudflare Worker + D1 schema
 - `scripts/` — helper scripts (example dSYM flow)
 
@@ -50,7 +50,7 @@ npx wrangler deploy
 
 ### 2) Integrate iOS SDK
 
-Add package from this repo in Xcode (File → Add Packages) and initialize:
+Add package from this repo in Xcode (File → Add Packages). The SwiftPM manifest is at repository root (`Package.swift`). Then initialize:
 
 ```swift
 import KabalCrashReporter
