@@ -3,12 +3,17 @@ import PackageDescription
 
 let package = Package(
     name: "KabalCrashReporter",
-    platforms: [.iOS(.v14)],
+    platforms: [
+        .iOS(.v15)
+    ],
     products: [
-        .library(name: "KabalCrashReporter", targets: ["KabalCrashReporter"])
+        .library(
+            name: "KabalCrashReporter",
+            targets: ["KabalCrashReporter"]
+        ),
     ],
     dependencies: [
-        .package(url: "https://github.com/kstenerud/KSCrash.git", exact: "2.5.1")
+        .package(url: "https://github.com/kstenerud/KSCrash", from: "2.5.1")
     ],
     targets: [
         .target(
@@ -19,6 +24,5 @@ let package = Package(
                 .product(name: "Sinks", package: "KSCrash")
             ]
         ),
-        .testTarget(name: "KabalCrashReporterTests", dependencies: ["KabalCrashReporter"])
     ]
 )

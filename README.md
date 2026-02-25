@@ -1,81 +1,171 @@
-# kabal-crash-reporter
+# Kabal Crash Reporter
 
-Open-source crash reporting stack for iOS apps:
-
-- **iOS Swift Package** to capture crashes + non-fatal events (depends on **KSCrash 2.5.1**, latest)
-- **Cloudflare Worker API** to ingest, deduplicate, and query crash reports
-- **Cloudflare D1 schema** for storage
-- **Scripts** for symbol upload/download workflow
-
-This is the same mechanism Kabal uses, packaged so other teams can self-host.
+Custom crash reporting system for Kabal (iOS + Backend).
 
 ## Architecture
 
-```text
-[iOS App + KabalCrashReporter SDK]
-  -> captures crash + metadata + optional breadcrumbs/feedback
-  -> POST /v1/crashes (Worker)
+```
+┌─────────────┐    ┌──────────────────┐    ┌─────────┐
+│   iOS App   │───▶│  Cloudflare      │───▶│   D1   │
+│  (KSCrash)  │    │  Worker API      │    │ SQLite │
+└─────────────┘    └──────────────────┘    └─────────┘
+                                     │
+┌─────────────┐                      │
+│   Backend   │──────────────────────┘
+│  (Lambda)   │
+└─────────────┘
 
-[Cloudflare Worker]
-  -> validates API key
-  -> computes fingerprint
-  -> writes to D1
-  -> exposes read API for triage automation
-
-[Automation / Agents]
-  -> GET /v1/crashes/new
-  -> create fixes, update status via API
+       │
+       ▼
+┌─────────────────────────────────────────┐
+│  Cron Job (OpenClaw)                    │
+│  - Query new crashes                    │
+│  - Analyze stack traces                 │
+│  - Fix bugs autonomously                │
+└─────────────────────────────────────────┘
 ```
 
-## Repository layout
+## Setup
 
-- `Package.swift`, `Sources/`, `Tests/` — Swift Package (`KabalCrashReporter`)
-- `worker/` — Cloudflare Worker + D1 schema
-- `scripts/` — helper scripts (example dSYM flow)
-
-## Quick start
-
-### 1) Deploy Worker
+### 1. Create D1 Database
 
 ```bash
-cd worker
-npm install
-cp .dev.vars.example .dev.vars
-# set API_KEY + optional ADMIN_TOKEN
-npx wrangler d1 create kabal_crash_reports
-# put DB id into wrangler.toml
-npx wrangler d1 execute kabal_crash_reports --file=./schema.sql
-npx wrangler deploy
+# In the kabal-crash-reporter directory
+wrangler d1 create kabal-crashes
+# Copy the database_id to wrangler.toml
 ```
 
-### 2) Integrate iOS SDK
+### 2. Apply Schema
 
-Add package from this repo in Xcode (File → Add Packages). The SwiftPM manifest is at repository root (`Package.swift`). Then initialize:
+```bash
+wrangler d1 execute kabal-crashes --file=schema.sql
+```
+
+### 3. Deploy Worker
+
+```bash
+wrangler deploy
+```
+
+### 4. iOS Setup
+
+Add to your `Package.swift` or via SPM in Xcode:
+
+```swift
+// Package URL: https://github.com/Ryce/kabal-crash-reporter
+// From: https://github.com/Ryce/kabal-crash-reporter/ios
+```
+
+In your App delegate:
 
 ```swift
 import KabalCrashReporter
 
-KabalCrashReporterSDK.shared.configure(
-  endpoint: URL(string: "https://your-worker.workers.dev")!,
-  apiKey: "YOUR_API_KEY",
-  appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
-  buildNumber: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
-)
+func application(_ application: UIApplication, 
+                 didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+    
+    let config = KabalCrashReporter.Config(
+        apiURL: "https://kabal-crash-reporter.<your-subdomain>.workers.dev/crashes",
+        appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0",
+        userId: currentUserId  // Optional
+    )
+    
+    KabalCrashReporter(config: config).start()
+    
+    return true
+}
 ```
 
-### 3) Read new crashes
+### 5. Backend Setup
 
-```bash
-curl -H "x-api-key: YOUR_API_KEY" \
-  "https://your-worker.workers.dev/v1/crashes/new?limit=20"
+Add to your Lambda handler:
+
+```typescript
+import type { APIGatewayProxyHandler } from 'aws-lambda';
+
+export const handler: APIGatewayProxyHandler = async (event) => {
+  try {
+    // Your handler logic
+    return { statusCode: 200, body: 'OK' };
+  } catch (error) {
+    // Report to crash reporter
+    await fetch('https://kabal-crash-reporter.<your-subdomain>.workers.dev/crashes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        platform: 'backend',
+        app_version: process.env.APP_VERSION,
+        error_name: error.name,
+        message: error.message,
+        stack_trace: error.stack,
+        context: {
+          requestId: event.requestContext?.requestId,
+          path: event.path,
+        }
+      })
+    });
+    
+    throw error;
+  }
+};
 ```
 
-## Security
+## dSYM Setup (for iOS symbolication)
 
-- Never commit real API keys, tokens, Apple credentials, or DSNs.
-- Keep `API_KEY` and `ADMIN_TOKEN` in Worker secrets.
-- Rotate keys if leaked.
+### Option 1: Xcode Cloud
+
+Add to your Xcode Cloud workflow:
+
+```yaml
+# ci_post_clone.sh or similar
+- script: |
+    cd $CI_ARCHIVE_PRODUCTS_PATH
+    for dSYM in $(find . -name "*.dSYM"); do
+      echo "Uploading $dSYM..."
+      # Upload to R2
+    done
+  name: Upload dSYMs
+```
+
+### Option 2: App Store Connect API
+
+See `scripts/download-dsyms.sh`
+
+## Cron Job (Autonomous Fixes)
+
+Add to OpenClaw via `HEARTBEAT.md` or cron:
+
+```yaml
+# cron.yaml
+crons:
+  - name: crash-reporter
+    schedule: "0 * * * *"  # Every hour
+    command: |
+      # Query new crashes from D1
+      wrangler d1 execute kabal-crashes --sql "SELECT * FROM crashes WHERE status = 'new'"
+      # For each crash, analyze and fix
+```
+
+## API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/crashes` | Submit crash report |
+| GET | `/crashes` | List crashes (query params: status, platform, limit) |
+| GET | `/crashes/new` | Get new crashes for cron |
+| PATCH | `/crashes/:id` | Update crash status |
+| GET | `/health` | Health check |
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `ASC_API_KEY` | App Store Connect API Key |
+| `ASC_ISSUER_ID` | App Store Connect Issuer ID |
+| `R2_ACCOUNT_ID` | Cloudflare R2 Account ID |
+| `R2_ACCESS_KEY` | R2 Access Key |
+| `R2_SECRET_KEY` | R2 Secret Key |
 
 ## License
 
-MIT
+Private - Ryce.

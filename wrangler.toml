@@ -1,0 +1,8 @@
+name = "kabal-crash-reporter"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "kabal-crashes"
+database_id = "d79cefb1-8c42-4658-9a46-cc9685c8804b"

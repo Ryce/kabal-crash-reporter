@@ -1,3 +1,10 @@
+//
+//  KabalCrashReporter.swift
+//  KabalCrashReporter
+//
+//  Lightweight crash reporter that wraps KSCrash and sends to custom API
+//
+
 import Foundation
 import UIKit
 import KSCrashRecording
@@ -5,12 +12,13 @@ import KSCrashInstallations
 import KSCrashSinks
 
 public final class KabalCrashReporter {
+    
     public struct Config {
         public let apiURL: String
         public let appVersion: String
         public let userId: String?
         public let apiKey: String?
-
+        
         public init(apiURL: String, appVersion: String, userId: String? = nil, apiKey: String? = nil) {
             self.apiURL = apiURL
             self.appVersion = appVersion
@@ -18,14 +26,14 @@ public final class KabalCrashReporter {
             self.apiKey = apiKey
         }
     }
-
+    
     public struct DeviceInfo: Codable {
         public let osVersion: String
         public let deviceModel: String
         public let appBundleId: String
         public let isJailbroken: Bool
         public let memoryUsage: UInt64?
-
+        
         public init(osVersion: String, deviceModel: String, appBundleId: String, isJailbroken: Bool, memoryUsage: UInt64?) {
             self.osVersion = osVersion
             self.deviceModel = deviceModel
@@ -34,71 +42,80 @@ public final class KabalCrashReporter {
             self.memoryUsage = memoryUsage
         }
     }
-
-    public enum FeedbackType: String {
-        case onboarding = "onboarding"
-        case settings = "settings"
-        case bugReport = "bug_report"
-        case featureRequest = "feature_request"
-        case general = "general"
-    }
-
+    
     private var config: Config
+    
     public static let shared = KabalCrashReporter(config: Config(apiURL: "", appVersion: ""))
-
+    
     public init(config: Config) {
         self.config = config
     }
 
+    /// Update the user identifier attached to future crash/error reports.
     public func setUserId(_ userId: String?) {
         config = Config(
             apiURL: config.apiURL,
             appVersion: config.appVersion,
-            userId: userId,
-            apiKey: config.apiKey
+            userId: userId
         )
     }
-
+    
+    /// Initialize and start crash reporting
     public func start() {
+        // Kabal calls `KabalCrashReporter(config: ...).start()` but reports through `.shared`.
+        // Mirror the runtime config into the shared singleton for those call sites.
         KabalCrashReporter.shared.config = config
-        setupUnhandledExceptionHandler()
 
         do {
+            // Configure KSCrash v2
             let crashConfig = KSCrashConfiguration()
             crashConfig.monitors = .productionSafe
-
+            
+            // Configure report store
             let storeConfig = CrashReportStoreConfiguration()
             storeConfig.maxReportCount = 10
             crashConfig.reportStoreConfiguration = storeConfig
-
+            
+            // Install KSCrash with config
             try KSCrash.shared.install(with: crashConfig)
+            
+            // Set up custom sink for our API
             setupCustomSink()
+            
+            // KSCrash handles uncaught exceptions as part of its installed monitors.
+            
             print("[KabalCrashReporter] Started - sending to \(config.apiURL)")
         } catch {
             print("[KabalCrashReporter] Failed to install: \(error)")
         }
     }
-
+    
     private func setupCustomSink() {
         guard let url = URL(string: config.apiURL), !config.apiURL.isEmpty else {
             print("[KabalCrashReporter] No API URL configured, crash reports will only be stored locally")
             return
         }
-
+        
+        // Create HTTP sink for custom URL
         let sink = CrashReportSinkStandard(url: url)
+        
+        // Set as sink for report store
         KSCrash.shared.reportStore?.sink = sink
+        
+        // Attempt to upload any cached reports on startup.
         KSCrash.shared.reportStore?.sendAllReports(completion: nil)
     }
-
+    
+    /// Get device info for crash context
     public func getDeviceInfo() -> DeviceInfo {
         let osVersion = UIDevice.current.systemVersion
         let deviceModel = getDeviceModel()
         let appBundleId = Bundle.main.bundleIdentifier ?? "unknown"
         let isJailbroken = checkIfJailbroken()
-
+        
         var memoryUsage: UInt64?
         var taskInfo = task_vm_info_data_t()
-        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size) / 4
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info>.size) / 4
         let result = withUnsafeMutablePointer(to: &taskInfo) {
             $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
                 task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
@@ -107,7 +124,7 @@ public final class KabalCrashReporter {
         if result == KERN_SUCCESS {
             memoryUsage = UInt64(taskInfo.phys_footprint)
         }
-
+        
         return DeviceInfo(
             osVersion: osVersion,
             deviceModel: deviceModel,
@@ -116,11 +133,13 @@ public final class KabalCrashReporter {
             memoryUsage: memoryUsage
         )
     }
-
+    
+    /// Manually report a non-fatal error
     public func reportError(name: String, message: String?, stackTrace: String?) {
         reportError(name: name, message: message, stackTrace: stackTrace, context: nil)
     }
-
+    
+    /// Report a network/API error with full context
     public func reportNetworkError(url: String, statusCode: Int?, error: Error?) {
         let context: [String: Any] = [
             "type": "network_error",
@@ -128,7 +147,7 @@ public final class KabalCrashReporter {
             "status_code": statusCode ?? 0,
             "error_description": error?.localizedDescription ?? ""
         ]
-
+        
         reportError(
             name: "NetworkError",
             message: error?.localizedDescription ?? "HTTP \(statusCode ?? 0)",
@@ -136,12 +155,13 @@ public final class KabalCrashReporter {
             context: context
         )
     }
-
+    
+    /// Report feedback from user
     public func reportFeedback(type: FeedbackType, message: String, context: [String: Any]? = nil) {
         var feedbackContext = context ?? [:]
         feedbackContext["feedback_type"] = type.rawValue
         feedbackContext["message"] = message
-
+        
         let report: [String: Any] = [
             "platform": "ios",
             "app_version": config.appVersion,
@@ -152,14 +172,25 @@ public final class KabalCrashReporter {
             "device_info": encodeToJSON(getDeviceInfo()),
             "context": feedbackContext
         ]
-
+        
         sendCrashReport(report)
     }
-
+    
+    /// Error types for feedback
+    public enum FeedbackType: String {
+        case onboarding = "onboarding"
+        case settings = "settings"
+        case bugReport = "bug_report"
+        case featureRequest = "feature_request"
+        case general = "general"
+    }
+    
+    // MARK: - Private
+    
     private func reportError(name: String, message: String?, stackTrace: String?, context: [String: Any]?) {
         var ctx = context ?? [:]
         ctx["timestamp"] = Int(Date().timeIntervalSince1970)
-
+        
         let crashReport: [String: Any] = [
             "platform": "ios",
             "app_version": config.appVersion,
@@ -170,10 +201,10 @@ public final class KabalCrashReporter {
             "device_info": encodeToJSON(getDeviceInfo()),
             "context": ctx
         ]
-
+        
         sendCrashReport(crashReport)
     }
-
+    
     private func setupUnhandledExceptionHandler() {
         NSSetUncaughtExceptionHandler { exception in
             let stackTrace = exception.callStackSymbols.joined(separator: "\n")
@@ -191,30 +222,30 @@ public final class KabalCrashReporter {
                     "timestamp": Int(Date().timeIntervalSince1970)
                 ]
             ]
-
+            
             KabalCrashReporter.shared.sendCrashReport(crashReport)
         }
     }
-
+    
     private func sendCrashReport(_ report: [String: Any]) {
         guard let url = URL(string: config.apiURL) else { return }
-
+        
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
+        
         if let apiKey = config.apiKey {
             request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
         }
-
+        
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: report)
         } catch {
             print("[KabalCrashReporter] Failed to encode crash report: \(error)")
             return
         }
-
-        URLSession.shared.dataTask(with: request) { _, response, error in
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
             if let error = error {
                 print("[KabalCrashReporter] Failed to send crash: \(error)")
             } else if let httpResponse = response as? HTTPURLResponse {
@@ -222,7 +253,7 @@ public final class KabalCrashReporter {
             }
         }.resume()
     }
-
+    
     private func getDeviceModel() -> String {
         var systemInfo = utsname()
         uname(&systemInfo)
@@ -233,7 +264,7 @@ public final class KabalCrashReporter {
         }
         return mapToDevice(identifier: identifier)
     }
-
+    
     private func mapToDevice(identifier: String) -> String {
         let deviceMap: [String: String] = [
             "iPhone14,4": "iPhone 13 mini",
@@ -248,17 +279,13 @@ public final class KabalCrashReporter {
             "iPhone15,5": "iPhone 15 Plus",
             "iPhone16,1": "iPhone 15 Pro",
             "iPhone16,2": "iPhone 15 Pro Max",
-            "iPhone17,1": "iPhone 16 Pro",
-            "iPhone17,2": "iPhone 16 Pro Max"
         ]
         return deviceMap[identifier] ?? identifier
     }
-
+    
     private func checkIfJailbroken() -> Bool {
-        #if targetEnvironment(simulator)
-        return false
-        #else
-        let paths = [
+        let fileManager = FileManager.default
+        let jailbreakPaths = [
             "/Applications/Cydia.app",
             "/Library/MobileSubstrate/MobileSubstrate.dylib",
             "/bin/bash",
@@ -266,22 +293,29 @@ public final class KabalCrashReporter {
             "/etc/apt",
             "/private/var/lib/apt/"
         ]
-        return paths.contains { FileManager.default.fileExists(atPath: $0) }
-        #endif
-    }
-
-    fileprivate func encodeToJSON<T: Encodable>(_ value: T) -> String {
-        do {
-            let data = try JSONEncoder().encode(value)
-            return String(data: data, encoding: .utf8) ?? "{}"
-        } catch {
-            return "{}"
+        
+        for path in jailbreakPaths {
+            if fileManager.fileExists(atPath: path) {
+                return true
+            }
         }
+        
+        return false
+    }
+    
+    private func encodeToJSON<T: Encodable>(_ object: T) -> String {
+        let encoder = JSONEncoder()
+        if let data = try? encoder.encode(object),
+           let string = String(data: data, encoding: .utf8) {
+            return string
+        }
+        return "{}"
     }
 }
 
-private extension Error {
+// MARK: - Error Extension for Stack Trace
+extension Error {
     var stackTrace: String {
-        Thread.callStackSymbols.joined(separator: "\n")
+        return Thread.callStackSymbols.joined(separator: "\n")
     }
 }
