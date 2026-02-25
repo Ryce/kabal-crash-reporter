@@ -14,7 +14,9 @@ let package = Package(
         .target(
             name: "KabalCrashReporter",
             dependencies: [
-                .product(name: "Installations", package: "KSCrash")
+                .product(name: "Recording", package: "KSCrash"),
+                .product(name: "Installations", package: "KSCrash"),
+                .product(name: "Sinks", package: "KSCrash")
             ]
         ),
         .testTarget(name: "KabalCrashReporterTests", dependencies: ["KabalCrashReporter"])
